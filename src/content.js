@@ -231,17 +231,71 @@ function removeNotesPanel() {
   document.getElementById(NOTES_STYLE_ID)?.remove();
 }
 
-async function loadNotes(videoId) {
-  if (!videoId) return { text: "", items: [] };
-  const key = `notes:${videoId}`;
-  const data = await chrome.storage.sync.get({ [key]: { text: "", items: [] } });
-  return data[key] || { text: "", items: [] };
+function makeId(prefix = "n") {
+  return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-async function saveNotes(videoId, notes) {
+function makeEmptyNotesData() {
+  const id = makeId("note");
+  return {
+    version: 2,
+    activeId: id,
+    notes: [
+      {
+        id,
+        title: "nota 1",
+        text: "",
+        items: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      }
+    ]
+  };
+}
+
+function normalizeNotesData(raw) {
+  if (raw && typeof raw === "object" && raw.version === 2 && Array.isArray(raw.notes)) {
+    if (!raw.activeId && raw.notes[0]?.id) raw.activeId = raw.notes[0].id;
+    if (!raw.notes.some(n => n.id === raw.activeId) && raw.notes[0]?.id) raw.activeId = raw.notes[0].id;
+    return raw;
+  }
+
+  // migrate old shape { text, items }
+  if (raw && typeof raw === "object" && ("text" in raw || "items" in raw)) {
+    const id = makeId("note");
+    const text = typeof raw.text === "string" ? raw.text : "";
+    const items = Array.isArray(raw.items) ? raw.items : [];
+
+    return {
+      version: 2,
+      activeId: id,
+      notes: [
+        {
+          id,
+          title: "nota 1",
+          text,
+          items,
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        }
+      ]
+    };
+  }
+
+  return makeEmptyNotesData();
+}
+
+async function loadNotes(videoId) {
+  if (!videoId) return makeEmptyNotesData();
+  const key = `notes:${videoId}`;
+  const data = await chrome.storage.sync.get({ [key]: null });
+  return normalizeNotesData(data[key]);
+}
+
+async function saveNotes(videoId, notesData) {
   if (!videoId) return;
   const key = `notes:${videoId}`;
-  await chrome.storage.sync.set({ [key]: notes });
+  await chrome.storage.sync.set({ [key]: notesData });
 }
 
 async function deleteNotes(videoId) {
@@ -265,105 +319,196 @@ function ensureNotesStyle() {
       position: fixed;
       right: 16px;
       bottom: 16px;
-      width: 360px;
+      width: 380px;
       max-width: calc(100vw - 32px);
-      max-height: 60vh;
-      background: rgba(20,20,20,0.92);
-      color: #fff;
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 12px;
+      max-height: 66vh;
+      background: var(--yt-spec-raised-background, rgba(24,24,24,0.94));
+      color: var(--yt-spec-text-primary, #fff);
+      border: 1px solid var(--yt-spec-10-percent-layer, rgba(255,255,255,0.14));
+      border-radius: 14px;
       z-index: 2147483647;
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      box-shadow: 0 12px 34px rgba(0,0,0,0.35);
     }
+
     #${NOTES_PANEL_ID} header {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 10px;
       padding: 10px 12px;
-      border-bottom: 1px solid rgba(255,255,255,0.12);
-      font: 600 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      border-bottom: 1px solid var(--yt-spec-10-percent-layer, rgba(255,255,255,0.14));
+      font: 700 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
       cursor: grab;
       user-select: none;
     }
+
     #${NOTES_PANEL_ID}.dragging header { cursor: grabbing; }
+
     #${NOTES_PANEL_ID} header .title {
       display: flex;
       gap: 10px;
       align-items: center;
       min-width: 0;
     }
+
     #${NOTES_PANEL_ID} header .title span {
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
-      max-width: 190px;
+      max-width: 210px;
       opacity: 0.95;
     }
+
     #${NOTES_PANEL_ID} header .actions {
       display: inline-flex;
       gap: 8px;
       align-items: center;
       flex: 0 0 auto;
     }
+
     #${NOTES_PANEL_ID} header button {
       border: 0;
-      background: rgba(255,255,255,0.12);
-      color: #fff;
+      background: var(--yt-spec-badge-chip-background, rgba(255,255,255,0.12));
+      color: var(--yt-spec-text-primary, #fff);
       padding: 6px 10px;
-      border-radius: 10px;
+      border-radius: 999px;
       cursor: pointer;
       font: 700 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
+
     #${NOTES_PANEL_ID} header button:hover { filter: brightness(1.06); }
+
+    #${NOTES_PANEL_ID} header button.danger {
+      background: rgba(239, 68, 68, 0.18);
+      color: var(--yt-spec-text-primary, #fff);
+    }
+
     #${NOTES_PANEL_ID} .body {
-      padding: 10px 12px;
+      padding: 10px 12px 12px 12px;
       display: grid;
       gap: 10px;
       overflow: auto;
     }
+
+    #${NOTES_PANEL_ID} .note-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    #${NOTES_PANEL_ID} .note-tabs {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      overflow-x: auto;
+      overflow-y: hidden;
+      padding-bottom: 2px;
+      flex: 1 1 auto;
+    }
+
+    #${NOTES_PANEL_ID} .note-tabs::-webkit-scrollbar { height: 6px; }
+    #${NOTES_PANEL_ID} .note-tabs::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,0.18);
+      border-radius: 99px;
+    }
+
+    #${NOTES_PANEL_ID} .note-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid var(--yt-spec-10-percent-layer, rgba(255,255,255,0.16));
+      background: var(--yt-spec-badge-chip-background, rgba(255,255,255,0.08));
+      color: var(--yt-spec-text-primary, #fff);
+      padding: 6px 10px;
+      border-radius: 999px;
+      font: 800 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      white-space: nowrap;
+    }
+
+    #${NOTES_PANEL_ID} .note-chip.active {
+      background: var(--yt-spec-call-to-action, #065fd4);
+      border-color: transparent;
+      color: #fff;
+    }
+
+    #${NOTES_PANEL_ID} .note-chip button {
+      border: 0;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      padding: 0 2px;
+      font: inherit;
+      opacity: 0.95;
+    }
+
+    #${NOTES_PANEL_ID} .note-chip button:hover { opacity: 1; }
+    #${NOTES_PANEL_ID} .note-chip .del { opacity: 0.75; }
+
+    #${NOTES_PANEL_ID} .mini {
+      border: 1px solid var(--yt-spec-10-percent-layer, rgba(255,255,255,0.16));
+      background: var(--yt-spec-badge-chip-background, rgba(255,255,255,0.08));
+      color: var(--yt-spec-text-primary, #fff);
+      padding: 6px 10px;
+      border-radius: 999px;
+      cursor: pointer;
+      font: 800 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      white-space: nowrap;
+    }
+
+    #${NOTES_PANEL_ID} .mini:hover { filter: brightness(1.06); }
+
     #${NOTES_PANEL_ID} textarea {
       width: 100%;
-      min-height: 110px;
+      min-height: 120px;
       resize: vertical;
-      border-radius: 10px;
-      border: 1px solid rgba(255,255,255,0.16);
-      padding: 10px;
-      background: rgba(0,0,0,0.25);
-      color: #fff;
+      border-radius: 12px;
+      border: 1px solid var(--yt-spec-10-percent-layer, rgba(255,255,255,0.16));
+      padding: 10px 12px;
+      background: var(--yt-spec-base-background, rgba(0,0,0,0.18));
+      color: var(--yt-spec-text-primary, #fff);
       outline: none;
-      font: 13px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      font: 13px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
+
+    #${NOTES_PANEL_ID} textarea:focus {
+      border-color: var(--yt-spec-call-to-action, #065fd4);
+      box-shadow: 0 0 0 3px rgba(6,95,212,0.18);
+    }
+
     #${NOTES_PANEL_ID} .row {
       display: flex;
       gap: 10px;
       align-items: center;
       justify-content: space-between;
     }
+
     #${NOTES_PANEL_ID} .row .hint {
-      opacity: 0.75;
+      opacity: 0.72;
       font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
+
     #${NOTES_PANEL_ID} .items {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       align-items: center;
     }
+
     #${NOTES_PANEL_ID} .chip {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      border: 1px solid rgba(255,255,255,0.16);
-      background: rgba(255,255,255,0.08);
-      color: #fff;
-      padding: 6px 8px;
+      border: 1px solid var(--yt-spec-10-percent-layer, rgba(255,255,255,0.16));
+      background: var(--yt-spec-badge-chip-background, rgba(255,255,255,0.08));
+      color: var(--yt-spec-text-primary, #fff);
+      padding: 6px 10px;
       border-radius: 999px;
-      font: 700 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      font: 800 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
+
     #${NOTES_PANEL_ID} .chip button {
       border: 0;
       background: transparent;
@@ -373,9 +518,30 @@ function ensureNotesStyle() {
       font: inherit;
       opacity: 0.95;
     }
+
     #${NOTES_PANEL_ID} .chip button:hover { opacity: 1; }
     #${NOTES_PANEL_ID} .chip .del { opacity: 0.75; }
+
+    #${NOTES_PANEL_ID} .footer {
+      display: flex;
+      justify-content: flex-end;
+    }
+
+    #${NOTES_PANEL_ID} .link {
+      border: 0;
+      background: transparent;
+      color: var(--yt-spec-text-secondary, rgba(255,255,255,0.78));
+      cursor: pointer;
+      font: 700 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      padding: 4px 6px;
+      opacity: 0.9;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+
+    #${NOTES_PANEL_ID} .link:hover { opacity: 1; }
   `;
+
   upsertStyle(NOTES_STYLE_ID, css);
 }
 
@@ -444,18 +610,25 @@ async function ensureNotesPanel(settings) {
           <span>notas do video</span>
         </div>
         <div class="actions">
-          <button id="ytfn-save" title="Salvar">salvar</button>
-          <button id="ytfn-clear" title="Excluir">excluir</button>
-          <button id="ytfn-close" title="Fechar">fechar</button>
+          <button id="ytfn-save" title="salvar">salvar</button>
+          <button id="ytfn-delnote" class="danger" title="excluir nota">excluir nota</button>
+          <button id="ytfn-close" title="fechar">fechar</button>
         </div>
       </header>
       <div class="body">
+        <div class="note-row">
+          <div class="note-tabs" id="ytfn-tabs"></div>
+          <button class="mini" id="ytfn-new" title="nova nota">+ nota</button>
+        </div>
         <div class="row">
-          <button id="ytfn-add">+ timestamp</button>
-          <div class="hint">arraste pelo topo</div>
+          <button class="mini" id="ytfn-add">+ timestamp</button>
+          <div class="hint">arraste pelo topo • duplo clique na nota para renomear</div>
         </div>
         <div class="items" id="ytfn-items"></div>
         <textarea id="ytfn-text" placeholder="anote aqui" spellcheck="true"></textarea>
+        <div class="footer">
+          <button class="link" id="ytfn-delall" title="excluir tudo do video">excluir tudo</button>
+        </div>
       </div>
     `;
 
@@ -464,7 +637,6 @@ async function ensureNotesPanel(settings) {
     panel.querySelector("#ytfn-close")?.addEventListener("click", () => setSetting("notesOpen", false));
   }
 
-  // keep position safe (if saved position is offscreen, clamp back to viewport)
   const pos = await loadNotesPos();
   if (pos && typeof pos.left === "number" && typeof pos.top === "number") {
     const r0 = panel.getBoundingClientRect();
@@ -477,23 +649,90 @@ async function ensureNotesPanel(settings) {
   }
 
   const videoId = parseVideoId();
-  const title = (document.querySelector("h1 yt-formatted-string")?.textContent || "notas do video").trim();
-  panel.querySelector("header .title span").textContent = title || "notas do video";
+  const videoTitle = (document.querySelector("h1 yt-formatted-string")?.textContent || "notas do video").trim();
+  panel.querySelector("header .title span").textContent = videoTitle || "notas do video";
 
+  const tabsEl = panel.querySelector("#ytfn-tabs");
   const textEl = panel.querySelector("#ytfn-text");
   const itemsEl = panel.querySelector("#ytfn-items");
+
+  const newBtn = panel.querySelector("#ytfn-new");
   const addBtn = panel.querySelector("#ytfn-add");
   const saveBtn = panel.querySelector("#ytfn-save");
-  const clearBtn = panel.querySelector("#ytfn-clear");
+  const delNoteBtn = panel.querySelector("#ytfn-delnote");
+  const delAllBtn = panel.querySelector("#ytfn-delall");
 
-  let notes = await loadNotes(videoId);
-  if (!notes || typeof notes !== "object") notes = { text: "", items: [] };
-  if (!Array.isArray(notes.items)) notes.items = [];
+  let notesData = await loadNotes(videoId);
 
-  const renderItems = () => {
+  const getActiveNote = () => notesData.notes.find(n => n.id === notesData.activeId) || notesData.notes[0];
+
+  const persist = async () => {
+    if (!videoId) return;
+    await saveNotes(videoId, notesData);
+  };
+
+  const renderTabs = () => {
+    tabsEl.innerHTML = "";
+
+    notesData.notes.forEach((n) => {
+      const chip = document.createElement("span");
+      chip.className = "note-chip" + (n.id === notesData.activeId ? " active" : "");
+
+      const btn = document.createElement("button");
+      btn.textContent = n.title || "nota";
+      btn.title = "selecionar nota";
+      btn.addEventListener("click", async () => {
+        notesData.activeId = n.id;
+        await persist();
+        renderAll();
+      });
+
+      btn.addEventListener("dblclick", async () => {
+        const next = prompt("nome da nota", n.title || "nota");
+        if (next === null) return;
+        n.title = String(next).trim().slice(0, 42) || "nota";
+        n.updatedAt = Date.now();
+        await persist();
+        renderTabs();
+      });
+
+      const del = document.createElement("button");
+      del.textContent = "×";
+      del.className = "del";
+      del.title = "excluir nota";
+      del.addEventListener("click", async () => {
+        const ok = confirm("excluir esta nota");
+        if (!ok) return;
+
+        if (notesData.notes.length <= 1) {
+          // keep at least 1 note
+          const only = notesData.notes[0];
+          only.text = "";
+          only.items = [];
+          only.updatedAt = Date.now();
+          notesData.activeId = only.id;
+        } else {
+          const idx = notesData.notes.findIndex(x => x.id === n.id);
+          notesData.notes.splice(idx, 1);
+          if (!notesData.notes.some(x => x.id === notesData.activeId)) {
+            notesData.activeId = notesData.notes[0]?.id || makeId("note");
+          }
+        }
+
+        await persist();
+        renderAll();
+      });
+
+      chip.appendChild(btn);
+      chip.appendChild(del);
+      tabsEl.appendChild(chip);
+    });
+  };
+
+  const renderItems = (activeNote) => {
     itemsEl.innerHTML = "";
 
-    notes.items.forEach((it, idx) => {
+    (activeNote.items || []).forEach((it, idx) => {
       const chip = document.createElement("span");
       chip.className = "chip";
 
@@ -510,9 +749,11 @@ async function ensureNotesPanel(settings) {
       del.className = "del";
       del.title = "excluir timestamp";
       del.addEventListener("click", async () => {
-        notes.items.splice(idx, 1);
-        renderItems();
-        await saveNotes(videoId, notes);
+        const note = getActiveNote();
+        note.items.splice(idx, 1);
+        note.updatedAt = Date.now();
+        renderItems(note);
+        await persist();
       });
 
       chip.appendChild(jump);
@@ -521,42 +762,113 @@ async function ensureNotesPanel(settings) {
     });
   };
 
-  renderItems();
-  textEl.value = notes.text || "";
+  const renderAll = () => {
+    // safety
+    if (!Array.isArray(notesData.notes) || notesData.notes.length === 0) notesData = makeEmptyNotesData();
+    if (!notesData.activeId) notesData.activeId = notesData.notes[0].id;
+    if (!notesData.notes.some(n => n.id === notesData.activeId)) notesData.activeId = notesData.notes[0].id;
 
+    renderTabs();
+    const active = getActiveNote();
+    textEl.value = active.text || "";
+    renderItems(active);
+
+    const disabled = !videoId;
+    newBtn.disabled = disabled;
+    addBtn.disabled = disabled;
+    saveBtn.disabled = disabled;
+    delNoteBtn.disabled = disabled;
+    delAllBtn.disabled = disabled;
+  };
+
+  // autosave with debounce (active note)
   let saveTimer = null;
   const scheduleAutoSave = () => {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      notes.text = textEl.value;
-      saveNotes(videoId, notes);
-    }, 500);
+    saveTimer = setTimeout(async () => {
+      const n = getActiveNote();
+      n.text = textEl.value;
+      n.updatedAt = Date.now();
+      await persist();
+    }, 450);
   };
 
   textEl.oninput = scheduleAutoSave;
 
+  newBtn.onclick = async () => {
+    if (!videoId) return;
+    const id = makeId("note");
+    const idx = notesData.notes.length + 1;
+    notesData.notes.unshift({
+      id,
+      title: `nota ${idx}`,
+      text: "",
+      items: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
+    notesData.activeId = id;
+    await persist();
+    renderAll();
+  };
+
   addBtn.onclick = async () => {
+    if (!videoId) return;
     const v = getVideoEl();
     if (!v) return;
+
     const t = Math.floor(v.currentTime || 0);
     const entry = { t, label: formatTime(t) };
-    notes.items = [entry, ...notes.items].slice(0, 30);
-    renderItems();
-    await saveNotes(videoId, notes);
+
+    const n = getActiveNote();
+    n.items = Array.isArray(n.items) ? n.items : [];
+    n.items = [entry, ...n.items].slice(0, 30);
+    n.updatedAt = Date.now();
+
+    renderItems(n);
+    await persist();
   };
 
   saveBtn.onclick = async () => {
-    notes.text = textEl.value;
-    await saveNotes(videoId, notes);
+    if (!videoId) return;
+    const n = getActiveNote();
+    n.text = textEl.value;
+    n.updatedAt = Date.now();
+    await persist();
   };
 
-  clearBtn.onclick = async () => {
+  delNoteBtn.onclick = async () => {
     if (!videoId) return;
-    notes = { text: "", items: [] };
-    textEl.value = "";
-    renderItems();
-    await deleteNotes(videoId);
+    const n = getActiveNote();
+    const ok = confirm("excluir esta nota");
+    if (!ok) return;
+
+    if (notesData.notes.length <= 1) {
+      n.text = "";
+      n.items = [];
+      n.updatedAt = Date.now();
+      await persist();
+      renderAll();
+      return;
+    }
+
+    notesData.notes = notesData.notes.filter(x => x.id !== n.id);
+    notesData.activeId = notesData.notes[0]?.id || makeId("note");
+    await persist();
+    renderAll();
   };
+
+  delAllBtn.onclick = async () => {
+    if (!videoId) return;
+    const ok = confirm("excluir todas as notas deste video");
+    if (!ok) return;
+
+    await deleteNotes(videoId);
+    notesData = makeEmptyNotesData();
+    renderAll();
+  };
+
+  renderAll();
 }
 
 function normalizeText(s, { ignoreCase = true, ignoreAccents = true } = {}) {
