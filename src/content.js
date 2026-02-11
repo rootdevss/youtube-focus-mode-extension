@@ -248,72 +248,116 @@ function getThreadCombinedText(thread) {
 }
 
 function ensureCommentSearchStyle() {
+  // Try to match YouTube's theme via CSS variables (fallbacks included).
   const css = `
     #${COMMENT_BAR_ID} {
-      margin: 10px 0 12px 0;
-      padding: 10px;
-      border: 1px solid rgba(0,0,0,0.1);
-      border-radius: 12px;
-      background: rgba(255,255,255,0.8);
-      backdrop-filter: blur(8px);
+      margin: 12px 0 14px 0;
+      padding: 12px;
+      border-radius: 14px;
+      background: var(--yt-spec-raised-background, rgba(255,255,255,0.92));
+      color: var(--yt-spec-text-primary, #0f0f0f);
+      border: 1px solid var(--yt-spec-10-percent-layer, rgba(0,0,0,0.10));
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
     }
     html[dark] #${COMMENT_BAR_ID} {
-      border-color: rgba(255,255,255,0.14);
-      background: rgba(32,32,32,0.82);
+      border-color: var(--yt-spec-10-percent-layer, rgba(255,255,255,0.14));
+      box-shadow: 0 2px 12px rgba(0,0,0,0.22);
     }
-    #${COMMENT_BAR_ID} .row {
+
+    #${COMMENT_BAR_ID} .ytfm-top {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       align-items: center;
     }
-    #${COMMENT_BAR_ID} input[type="text"] {
-      flex: 1 1 240px;
+
+    #${COMMENT_BAR_ID} .ytfm-input {
+      flex: 1 1 320px;
       min-width: 220px;
-      padding: 8px 10px;
-      border-radius: 10px;
-      border: 1px solid rgba(0,0,0,0.14);
+      height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--yt-spec-10-percent-layer, rgba(0,0,0,0.14));
+      background: var(--yt-spec-base-background, rgba(255,255,255,0.7));
+      color: var(--yt-spec-text-primary, #0f0f0f);
       outline: none;
-      font: 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      font: 13px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
-    html[dark] #${COMMENT_BAR_ID} input[type="text"] {
+    html[dark] #${COMMENT_BAR_ID} .ytfm-input {
+      background: rgba(0,0,0,0.18);
       border-color: rgba(255,255,255,0.18);
-      background: rgba(0,0,0,0.25);
       color: #fff;
     }
-    #${COMMENT_BAR_ID} button {
-      border: 0;
-      padding: 8px 10px;
-      border-radius: 10px;
+    #${COMMENT_BAR_ID} .ytfm-input:focus {
+      border-color: var(--yt-spec-call-to-action, #065fd4);
+      box-shadow: 0 0 0 3px rgba(6,95,212,0.18);
+    }
+
+    #${COMMENT_BAR_ID} .ytfm-btn {
+      height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--yt-spec-10-percent-layer, rgba(0,0,0,0.12));
       cursor: pointer;
-      background: rgba(0,0,0,0.08);
+      background: var(--yt-spec-badge-chip-background, rgba(0,0,0,0.06));
+      color: var(--yt-spec-text-primary, #0f0f0f);
       font: 600 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
     }
-    html[dark] #${COMMENT_BAR_ID} button {
-      background: rgba(255,255,255,0.12);
+    html[dark] #${COMMENT_BAR_ID} .ytfm-btn {
+      background: rgba(255,255,255,0.10);
+      border-color: rgba(255,255,255,0.14);
       color: #fff;
     }
-    #${COMMENT_BAR_ID} label {
-      display: inline-flex;
-      gap: 6px;
+    #${COMMENT_BAR_ID} .ytfm-btn:hover {
+      filter: brightness(0.98);
+    }
+    #${COMMENT_BAR_ID} .ytfm-btn-primary {
+      background: var(--yt-spec-call-to-action, #065fd4);
+      border-color: transparent;
+      color: #fff;
+    }
+
+    #${COMMENT_BAR_ID} .ytfm-options {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
       align-items: center;
+    }
+
+    #${COMMENT_BAR_ID} .ytfm-opt {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      user-select: none;
       font: 600 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
       opacity: 0.9;
     }
-    #${COMMENT_BAR_ID} .meta {
-      margin-top: 6px;
-      font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
-      opacity: 0.75;
+
+    #${COMMENT_BAR_ID} input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--yt-spec-call-to-action, #065fd4);
+      transform: translateY(1px);
     }
+
+    #${COMMENT_BAR_ID} .ytfm-meta {
+      margin-top: 8px;
+      font: 12px/1.25 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      opacity: 0.72;
+    }
+
     ytd-comment-thread-renderer.ytfm-comment-match {
-      outline: 2px solid rgba(34, 197, 94, 0.55);
+      scroll-margin-top: 96px;
       border-radius: 12px;
       background: rgba(34, 197, 94, 0.06);
+      box-shadow: inset 4px 0 0 rgba(34, 197, 94, 0.95);
     }
     html[dark] ytd-comment-thread-renderer.ytfm-comment-match {
-      background: rgba(34, 197, 94, 0.10);
+      background: rgba(34, 197, 94, 0.12);
     }
   `;
+
   upsertStyle(COMMENT_STYLE_ID, css);
 }
 
@@ -387,18 +431,18 @@ async function ensureCommentSearchBar(settings) {
     bar = document.createElement("div");
     bar.id = COMMENT_BAR_ID;
     bar.innerHTML = `
-      <div class="row">
-        <input id="ytfm-cq" type="text" placeholder="Pesquisar comentários… (ex: manda salve)" />
-        <button id="ytfm-csearch" title="Pesquisar">Pesquisar</button>
-        <button id="ytfm-cclear" title="Limpar">Limpar</button>
-        <button id="ytfm-cload" title="Carregar mais comentários">Carregar mais</button>
+      <div class="ytfm-top">
+        <input class="ytfm-input" id="ytfm-cq" type="text" placeholder="Pesquisar comentários… (ex: manda salve)" />
+        <button class="ytfm-btn ytfm-btn-primary" id="ytfm-csearch" title="Pesquisar">Pesquisar</button>
+        <button class="ytfm-btn" id="ytfm-cclear" title="Limpar">Limpar</button>
+        <button class="ytfm-btn" id="ytfm-cload" title="Carregar mais comentários">Carregar mais</button>
       </div>
-      <div class="row" style="margin-top:8px;">
-        <label><input id="ytfm-cfilter" type="checkbox" /> Filtrar (esconder não-matches)</label>
-        <label><input id="ytfm-call" type="checkbox" /> Todas as palavras</label>
-        <label><input id="ytfm-cacc" type="checkbox" checked /> Ignorar acentos</label>
+      <div class="ytfm-options">
+        <label class="ytfm-opt"><input id="ytfm-cfilter" type="checkbox" /> Filtrar</label>
+        <label class="ytfm-opt"><input id="ytfm-call" type="checkbox" /> Todas as palavras</label>
+        <label class="ytfm-opt"><input id="ytfm-cacc" type="checkbox" checked /> Ignorar acentos</label>
       </div>
-      <div class="meta" id="ytfm-cmeta">Dica: role a página ou use “Carregar mais” para buscar em mais comentários carregados.</div>
+      <div class="ytfm-meta" id="ytfm-cmeta">Dica: role a página ou use “Carregar mais” para buscar em mais comentários carregados.</div>
     `;
 
     const header = document.querySelector("ytd-comments-header-renderer");
@@ -432,7 +476,6 @@ async function ensureCommentSearchBar(settings) {
       });
       meta.textContent = `${res.matches} encontrado(s) • ${res.total} comentários carregados`;
 
-      // Scroll to first match if filtering is off
       if (res.matches > 0) {
         const first = document.querySelector("ytd-comment-thread-renderer.ytfm-comment-match");
         first?.scrollIntoView?.({ behavior: "smooth", block: "center" });
@@ -456,7 +499,6 @@ async function ensureCommentSearchBar(settings) {
     btnLoad.addEventListener("click", async () => {
       meta.textContent = "Carregando mais comentários…";
       await loadMoreCommentsOnce();
-      // Re-run search if there's a query
       if (q.value.trim()) update();
       else meta.textContent = "Mais comentários carregados. Agora pesquise.";
     });
@@ -465,7 +507,6 @@ async function ensureCommentSearchBar(settings) {
     chkAll.addEventListener("change", () => q.value.trim() && update());
     chkAcc.addEventListener("change", () => q.value.trim() && update());
 
-    // Start message
     meta.textContent = "Digite uma palavra/frase e clique em Pesquisar.";
   }
 }
@@ -508,7 +549,6 @@ function setupKeyboard(settings) {
         toggleTheaterNow();
         break;
       case "KeyC":
-        // Focus comment search if available
         if (settings.commentSearch) {
           const ok = focusCommentSearch();
           if (ok) e.preventDefault();
