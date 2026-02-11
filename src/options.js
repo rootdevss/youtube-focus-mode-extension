@@ -1,5 +1,5 @@
 const DEFAULTS = {
-  enabled: true,
+  enabled: false,
   hideShorts: true,
   hideHomeFeed: false,
   hideRelated: true,

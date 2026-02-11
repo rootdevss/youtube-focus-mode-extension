@@ -2,7 +2,7 @@
 
 const DEFAULTS = {
   // Focus Mode
-  enabled: true,
+  enabled: false,
   hideShorts: true,
   hideHomeFeed: false,
   hideRelated: true,
@@ -384,7 +384,6 @@ function startDrag(panel, e) {
   const header = panel.querySelector("header");
   if (!header) return;
 
-  // do not start drag when clicking buttons
   if (e.target && (e.target.tagName || "").toUpperCase() === "BUTTON") return;
 
   const rect = panel.getBoundingClientRect();
@@ -392,7 +391,9 @@ function startDrag(panel, e) {
     startX: e.clientX,
     startY: e.clientY,
     startLeft: rect.left,
-    startTop: rect.top
+    startTop: rect.top,
+    w: rect.width,
+    h: rect.height
   };
 
   panel.classList.add("dragging");
@@ -402,8 +403,8 @@ function startDrag(panel, e) {
     const dx = ev.clientX - dragState.startX;
     const dy = ev.clientY - dragState.startY;
 
-    const newLeft = clamp(dragState.startLeft + dx, 8, window.innerWidth - rect.width - 8);
-    const newTop = clamp(dragState.startTop + dy, 8, window.innerHeight - rect.height - 8);
+    const newLeft = clamp(dragState.startLeft + dx, 8, window.innerWidth - dragState.w - 8);
+    const newTop = clamp(dragState.startTop + dy, 8, window.innerHeight - dragState.h - 8);
 
     panel.style.left = `${newLeft}px`;
     panel.style.top = `${newTop}px`;
@@ -459,18 +460,18 @@ async function ensureNotesPanel(settings) {
     `;
 
     document.documentElement.appendChild(panel);
-
-    // drag
     panel.querySelector("header")?.addEventListener("mousedown", (e) => startDrag(panel, e));
-
     panel.querySelector("#ytfn-close")?.addEventListener("click", () => setSetting("notesOpen", false));
   }
 
-  // apply saved position once per open
+  // keep position safe (if saved position is offscreen, clamp back to viewport)
   const pos = await loadNotesPos();
   if (pos && typeof pos.left === "number" && typeof pos.top === "number") {
-    panel.style.left = `${pos.left}px`;
-    panel.style.top = `${pos.top}px`;
+    const r0 = panel.getBoundingClientRect();
+    const left = clamp(pos.left, 8, window.innerWidth - r0.width - 8);
+    const top = clamp(pos.top, 8, window.innerHeight - r0.height - 8);
+    panel.style.left = `${left}px`;
+    panel.style.top = `${top}px`;
     panel.style.right = "auto";
     panel.style.bottom = "auto";
   }
@@ -523,7 +524,6 @@ async function ensureNotesPanel(settings) {
   renderItems();
   textEl.value = notes.text || "";
 
-  // autosave with debounce
   let saveTimer = null;
   const scheduleAutoSave = () => {
     clearTimeout(saveTimer);
