@@ -14,12 +14,15 @@ const DEFAULTS = {
   rememberSpeedByChannel: true,
   defaultSpeed: 1.25,
   keyboardShortcuts: true,
-  notesOpen: false
+  notesOpen: false,
+  commentSearch: true
 };
 
 const STYLE_ID = "yt-focus-mode-style";
 const NOTES_STYLE_ID = "yt-focus-notes-style";
 const NOTES_PANEL_ID = "yt-focus-notes-panel";
+const COMMENT_STYLE_ID = "yt-focus-comment-search-style";
+const COMMENT_BAR_ID = "yt-focus-comment-search";
 
 let currentKeyHandler = null;
 let currentRateHandler = null;
@@ -176,7 +179,6 @@ async function waitFor(selector, timeoutMs = 6000) {
 
 async function ensureTheater(settings) {
   if (!settings.autoTheater) return;
-  // Only on watch pages
   if (!location.pathname.startsWith("/watch")) return;
 
   const flexy = await waitFor("ytd-watch-flexy", 6000);
@@ -196,7 +198,6 @@ async function setupSpeedMemory(settings) {
   const video = getVideoEl();
   if (!video) return;
 
-  // Clean previous listener
   if (currentRateHandler) {
     video.removeEventListener("ratechange", currentRateHandler);
     currentRateHandler = null;
@@ -207,7 +208,6 @@ async function setupSpeedMemory(settings) {
   const channelKey = getChannelKey();
   const storageKey = channelKey ? `speedByChannel:${channelKey}` : null;
 
-  // Apply initial rate once
   try {
     if (storageKey) {
       const data = await chrome.storage.sync.get({ [storageKey]: null });
@@ -229,6 +229,255 @@ async function setupSpeedMemory(settings) {
   };
 
   video.addEventListener("ratechange", currentRateHandler);
+}
+
+function normalizeText(s, { ignoreCase = true, ignoreAccents = true } = {}) {
+  let t = String(s ?? "");
+  if (ignoreCase) t = t.toLowerCase();
+  if (ignoreAccents) t = t.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return t;
+}
+
+function getLoadedCommentThreads() {
+  return Array.from(document.querySelectorAll("ytd-comment-thread-renderer"));
+}
+
+function getThreadCombinedText(thread) {
+  const nodes = thread.querySelectorAll("#content-text");
+  return Array.from(nodes).map(n => (n.textContent || "").trim()).join("\n");
+}
+
+function ensureCommentSearchStyle() {
+  const css = `
+    #${COMMENT_BAR_ID} {
+      margin: 10px 0 12px 0;
+      padding: 10px;
+      border: 1px solid rgba(0,0,0,0.1);
+      border-radius: 12px;
+      background: rgba(255,255,255,0.8);
+      backdrop-filter: blur(8px);
+    }
+    html[dark] #${COMMENT_BAR_ID} {
+      border-color: rgba(255,255,255,0.14);
+      background: rgba(32,32,32,0.82);
+    }
+    #${COMMENT_BAR_ID} .row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    #${COMMENT_BAR_ID} input[type="text"] {
+      flex: 1 1 240px;
+      min-width: 220px;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(0,0,0,0.14);
+      outline: none;
+      font: 13px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+    html[dark] #${COMMENT_BAR_ID} input[type="text"] {
+      border-color: rgba(255,255,255,0.18);
+      background: rgba(0,0,0,0.25);
+      color: #fff;
+    }
+    #${COMMENT_BAR_ID} button {
+      border: 0;
+      padding: 8px 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      background: rgba(0,0,0,0.08);
+      font: 600 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+    html[dark] #${COMMENT_BAR_ID} button {
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+    }
+    #${COMMENT_BAR_ID} label {
+      display: inline-flex;
+      gap: 6px;
+      align-items: center;
+      font: 600 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      opacity: 0.9;
+    }
+    #${COMMENT_BAR_ID} .meta {
+      margin-top: 6px;
+      font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      opacity: 0.75;
+    }
+    ytd-comment-thread-renderer.ytfm-comment-match {
+      outline: 2px solid rgba(34, 197, 94, 0.55);
+      border-radius: 12px;
+      background: rgba(34, 197, 94, 0.06);
+    }
+    html[dark] ytd-comment-thread-renderer.ytfm-comment-match {
+      background: rgba(34, 197, 94, 0.10);
+    }
+  `;
+  upsertStyle(COMMENT_STYLE_ID, css);
+}
+
+async function loadMoreCommentsOnce() {
+  const comments = document.querySelector("#comments");
+  if (comments) comments.scrollIntoView({ behavior: "smooth", block: "start" });
+  await new Promise(r => setTimeout(r, 500));
+  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+  await new Promise(r => setTimeout(r, 900));
+}
+
+function clearCommentMatches() {
+  for (const thread of getLoadedCommentThreads()) {
+    thread.classList.remove("ytfm-comment-match");
+    thread.style.display = "";
+  }
+}
+
+function runCommentSearch({ query, filterMode, matchAllWords, ignoreAccents }) {
+  const q = normalizeText(query, { ignoreCase: true, ignoreAccents });
+  const words = q.split(/\s+/).map(s => s.trim()).filter(Boolean);
+
+  const threads = getLoadedCommentThreads();
+  let matches = 0;
+
+  for (const thread of threads) {
+    const text = normalizeText(getThreadCombinedText(thread), { ignoreCase: true, ignoreAccents });
+    const ok = words.length === 0
+      ? false
+      : (matchAllWords ? words.every(w => text.includes(w)) : words.some(w => text.includes(w)));
+
+    if (ok) {
+      matches++;
+      thread.classList.add("ytfm-comment-match");
+      thread.style.display = "";
+    } else {
+      thread.classList.remove("ytfm-comment-match");
+      thread.style.display = filterMode ? "none" : "";
+    }
+  }
+
+  return { matches, total: threads.length };
+}
+
+function removeCommentSearchBar() {
+  document.getElementById(COMMENT_BAR_ID)?.remove();
+  document.getElementById(COMMENT_STYLE_ID)?.remove();
+  clearCommentMatches();
+}
+
+async function ensureCommentSearchBar(settings) {
+  // Only watch pages
+  if (!location.pathname.startsWith("/watch")) {
+    removeCommentSearchBar();
+    return;
+  }
+
+  // If user hid comments OR disabled feature, remove bar.
+  if (settings.hideComments || !settings.commentSearch) {
+    removeCommentSearchBar();
+    return;
+  }
+
+  const commentsRoot = await waitFor("#comments", 6000);
+  if (!commentsRoot) return;
+
+  ensureCommentSearchStyle();
+
+  let bar = document.getElementById(COMMENT_BAR_ID);
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = COMMENT_BAR_ID;
+    bar.innerHTML = `
+      <div class="row">
+        <input id="ytfm-cq" type="text" placeholder="Pesquisar comentários… (ex: manda salve)" />
+        <button id="ytfm-csearch" title="Pesquisar">Pesquisar</button>
+        <button id="ytfm-cclear" title="Limpar">Limpar</button>
+        <button id="ytfm-cload" title="Carregar mais comentários">Carregar mais</button>
+      </div>
+      <div class="row" style="margin-top:8px;">
+        <label><input id="ytfm-cfilter" type="checkbox" /> Filtrar (esconder não-matches)</label>
+        <label><input id="ytfm-call" type="checkbox" /> Todas as palavras</label>
+        <label><input id="ytfm-cacc" type="checkbox" checked /> Ignorar acentos</label>
+      </div>
+      <div class="meta" id="ytfm-cmeta">Dica: role a página ou use “Carregar mais” para buscar em mais comentários carregados.</div>
+    `;
+
+    const header = document.querySelector("ytd-comments-header-renderer");
+    if (header?.parentElement) {
+      header.parentElement.insertBefore(bar, header.nextSibling);
+    } else {
+      commentsRoot.prepend(bar);
+    }
+
+    const q = bar.querySelector("#ytfm-cq");
+    const btnSearch = bar.querySelector("#ytfm-csearch");
+    const btnClear = bar.querySelector("#ytfm-cclear");
+    const btnLoad = bar.querySelector("#ytfm-cload");
+    const chkFilter = bar.querySelector("#ytfm-cfilter");
+    const chkAll = bar.querySelector("#ytfm-call");
+    const chkAcc = bar.querySelector("#ytfm-cacc");
+    const meta = bar.querySelector("#ytfm-cmeta");
+
+    const update = () => {
+      const query = q.value;
+      clearCommentMatches();
+      if (!query.trim()) {
+        meta.textContent = "Digite uma palavra/frase e clique em Pesquisar.";
+        return;
+      }
+      const res = runCommentSearch({
+        query,
+        filterMode: chkFilter.checked,
+        matchAllWords: chkAll.checked,
+        ignoreAccents: chkAcc.checked
+      });
+      meta.textContent = `${res.matches} encontrado(s) • ${res.total} comentários carregados`;
+
+      // Scroll to first match if filtering is off
+      if (res.matches > 0) {
+        const first = document.querySelector("ytd-comment-thread-renderer.ytfm-comment-match");
+        first?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      }
+    };
+
+    btnSearch.addEventListener("click", update);
+    q.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") update();
+    });
+
+    btnClear.addEventListener("click", () => {
+      q.value = "";
+      chkFilter.checked = false;
+      chkAll.checked = false;
+      clearCommentMatches();
+      meta.textContent = "Digite uma palavra/frase e clique em Pesquisar.";
+      q.focus();
+    });
+
+    btnLoad.addEventListener("click", async () => {
+      meta.textContent = "Carregando mais comentários…";
+      await loadMoreCommentsOnce();
+      // Re-run search if there's a query
+      if (q.value.trim()) update();
+      else meta.textContent = "Mais comentários carregados. Agora pesquise.";
+    });
+
+    chkFilter.addEventListener("change", () => q.value.trim() && update());
+    chkAll.addEventListener("change", () => q.value.trim() && update());
+    chkAcc.addEventListener("change", () => q.value.trim() && update());
+
+    // Start message
+    meta.textContent = "Digite uma palavra/frase e clique em Pesquisar.";
+  }
+}
+
+function focusCommentSearch() {
+  const q = document.querySelector(`#${COMMENT_BAR_ID} #ytfm-cq`);
+  if (q) {
+    q.focus();
+    q.select?.();
+    return true;
+  }
+  return false;
 }
 
 function setupKeyboard(settings) {
@@ -257,6 +506,13 @@ function setupKeyboard(settings) {
       case "KeyT":
         e.preventDefault();
         toggleTheaterNow();
+        break;
+      case "KeyC":
+        // Focus comment search if available
+        if (settings.commentSearch) {
+          const ok = focusCommentSearch();
+          if (ok) e.preventDefault();
+        }
         break;
       case "ArrowUp":
         if (!video) return;
@@ -440,7 +696,6 @@ async function ensureNotesPanel(settings) {
   if (!notes || typeof notes !== "object") notes = { text: "", items: [] };
   if (!Array.isArray(notes.items)) notes.items = [];
 
-  // Render items
   const renderItems = () => {
     itemsEl.innerHTML = "";
     for (const it of notes.items) {
@@ -459,7 +714,6 @@ async function ensureNotesPanel(settings) {
   renderItems();
   textEl.value = notes.text || "";
 
-  // Debounced save
   let saveTimer = null;
   const scheduleSave = () => {
     clearTimeout(saveTimer);
@@ -469,7 +723,6 @@ async function ensureNotesPanel(settings) {
     }, 400);
   };
 
-  // Avoid stacking listeners if we re-open on SPA
   textEl.oninput = scheduleSave;
 
   addBtn.onclick = () => {
@@ -487,11 +740,10 @@ async function applyAll() {
   const settings = await getSettings();
   upsertStyle(STYLE_ID, buildCss(settings));
 
-  // Extras
   setupKeyboard(settings);
   ensureNotesPanel(settings);
+  ensureCommentSearchBar(settings);
 
-  // Watch page extras that may need DOM ready
   ensureTheater(settings);
   setupSpeedMemory(settings);
 }
@@ -501,12 +753,15 @@ applyAll();
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "sync") return;
   const keys = Object.keys(changes);
-  if (keys.some(k => k in DEFAULTS) || keys.some(k => k.startsWith("notes:")) || keys.some(k => k.startsWith("speedByChannel:"))) {
+  if (
+    keys.some(k => k in DEFAULTS) ||
+    keys.some(k => k.startsWith("notes:")) ||
+    keys.some(k => k.startsWith("speedByChannel:"))
+  ) {
     applyAll();
   }
 });
 
-// YouTube uses SPA navigation; watch for URL changes
 new MutationObserver(() => {
   if (location.href !== currentUrl) {
     currentUrl = location.href;

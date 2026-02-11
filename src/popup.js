@@ -10,7 +10,8 @@ const DEFAULTS = {
   rememberSpeedByChannel: true,
   defaultSpeed: 1.25,
   keyboardShortcuts: true,
-  notesOpen: false
+  notesOpen: false,
+  commentSearch: true
 };
 
 const ids = [
@@ -23,7 +24,8 @@ const ids = [
   "autoTheater",
   "rememberSpeedByChannel",
   "keyboardShortcuts",
-  "notesOpen"
+  "notesOpen",
+  "commentSearch"
 ];
 
 function $(id){ return document.getElementById(id); }

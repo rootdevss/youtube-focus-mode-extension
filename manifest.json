@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "YouTube Focus Mode",
-  "version": "0.2.0",
-  "description": "Reduz distrações no YouTube e adiciona recursos de estudo (notas, velocidade por canal, atalhos).",
+  "version": "0.2.1",
+  "description": "Reduz distrações no YouTube e adiciona recursos de estudo (notas, velocidade por canal, atalhos, busca em comentários).",
   "permissions": ["storage"],
   "host_permissions": ["*://*.youtube.com/*"],
   "action": {
