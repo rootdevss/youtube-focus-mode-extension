@@ -8,7 +8,7 @@ const DEFAULTS = {
 
   autoTheater: false,
   rememberSpeedByChannel: true,
-  defaultSpeed: 1.25,
+  defaultSpeed: 1.0,
   keyboardShortcuts: true,
   notesOpen: false,
   commentSearch: true
