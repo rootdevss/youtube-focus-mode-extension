@@ -9,15 +9,28 @@
   <body>
     <main>
       <h1>Configurações</h1>
-      <p>Escolha o que esconder no YouTube. As mudanças são aplicadas automaticamente.</p>
+      <p>Escolha o que esconder e quais extras habilitar. As mudanças são aplicadas automaticamente.</p>
 
       <section class="card">
+        <h2>Focus Mode</h2>
         <label><input id="enabled" type="checkbox" /> Ativado</label>
         <label><input id="hideShorts" type="checkbox" /> Esconder Shorts</label>
         <label><input id="hideRelated" type="checkbox" /> Esconder relacionados</label>
         <label><input id="hideComments" type="checkbox" /> Esconder comentários</label>
         <label><input id="hideSidebar" type="checkbox" /> Esconder menu lateral</label>
         <label><input id="hideHomeFeed" type="checkbox" /> Esconder feed da Home</label>
+      </section>
+
+      <section class="card">
+        <h2>Extras</h2>
+        <label><input id="autoTheater" type="checkbox" /> Auto Theater (modo teatro automático)</label>
+        <label><input id="rememberSpeedByChannel" type="checkbox" /> Lembrar velocidade por canal</label>
+        <div class="row">
+          <label for="defaultSpeed">Velocidade padrão</label>
+          <input id="defaultSpeed" type="number" min="0.25" max="3" step="0.05" />
+        </div>
+        <label><input id="keyboardShortcuts" type="checkbox" /> Atalhos (Shift+F/N/T e Shift+↑/↓)</label>
+        <label><input id="notesOpen" type="checkbox" /> Notas (painel flutuante)</label>
       </section>
 
       <p class="hint">Dica: se algum elemento do YouTube mudar, talvez seja preciso ajustar seletores CSS em <code>src/content.js</code>.</p>

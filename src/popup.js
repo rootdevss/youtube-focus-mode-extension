@@ -4,10 +4,27 @@ const DEFAULTS = {
   hideHomeFeed: false,
   hideRelated: true,
   hideComments: true,
-  hideSidebar: false
+  hideSidebar: false,
+
+  autoTheater: false,
+  rememberSpeedByChannel: true,
+  defaultSpeed: 1.25,
+  keyboardShortcuts: true,
+  notesOpen: false
 };
 
-const ids = Object.keys(DEFAULTS);
+const ids = [
+  "enabled",
+  "hideShorts",
+  "hideRelated",
+  "hideComments",
+  "hideSidebar",
+  "hideHomeFeed",
+  "autoTheater",
+  "rememberSpeedByChannel",
+  "keyboardShortcuts",
+  "notesOpen"
+];
 
 function $(id){ return document.getElementById(id); }
 
