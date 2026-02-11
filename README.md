@@ -1,22 +1,37 @@
-# YouTube Focus Mode Extension (MV3)
+# youtube focus mode
 
-Extensão de navegador para reduzir distrações no YouTube, escondendo elementos como **Shorts**, recomendações e comentários.
+extensao mv3 para deixar o youtube mais limpo e mais produtivo
 
-## Recursos
-- Alternar (liga/desliga) por item: Shorts, recomendações (Home/Related), comentários e barra lateral.
-- Funciona via CSS + content script (sem login, sem scraping de dados).
+## o que tem
+- focus mode para esconder shorts relacionados comentarios menu lateral e feed da home
+- auto theater opcional em videos
+- velocidade por canal opcional e velocidade padrao
+- atalhos de teclado opcionais shift f n t e shift seta pra cima ou baixo
+- notas por video com timestamps
+- buscar comentarios por palavra ou frase direto na area de comentarios
 
-## Como usar (Chrome/Edge)
-1. Abra `chrome://extensions`.
-2. Ative **Developer mode**.
-3. Clique em **Load unpacked** e selecione a pasta do projeto (onde está o `manifest.json`).
-4. Abra o YouTube e use o popup para ativar/desativar os filtros.
+## instalar no chrome ou edge
+- abra chrome://extensions ou edge://extensions
+- ative developer mode
+- clique em load unpacked e selecione a pasta do projeto onde esta o manifest json
 
-## Estrutura
-- `manifest.json` (MV3)
-- `src/content.js` injeta CSS conforme configurações
-- `src/popup.*` UI rápida
-- `src/options.*` página de configurações
+## usar
+- abra um video e use o popup da extensao para ligar e desligar funcoes
+- notas podem ser arrastadas pela barra do topo e a posicao fica salva
+- a busca de comentarios aparece acima dos comentarios quando esconder comentarios estiver desligado
 
-## Aviso
-Este projeto não automatiza ações no YouTube e não armazena credenciais.
+## atalhos
+- shift f alterna focus mode
+- shift n abre ou fecha notas
+- shift t alterna theater
+- shift c foca a busca de comentarios
+- shift seta para cima ou baixo ajusta a velocidade
+
+## privacidade
+- nao usa servidor
+- salva configuracoes e notas no chrome storage sync
+
+## publicar depois
+- ja tem licenca mit
+- tem privacy e security docs
+- quando quiser basta deixar o repo publico e opcionalmente publicar na chrome web store

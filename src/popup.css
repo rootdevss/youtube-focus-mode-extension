@@ -1,7 +1,7 @@
 body{
   margin:0;
   padding:12px;
-  width:280px;
+  width:300px;
   font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   color:#111;
 }
@@ -9,5 +9,12 @@ header{display:flex; align-items:baseline; justify-content:space-between; gap:10
 h1{font-size:14px; margin:0;}
 .link{font-size:12px; text-decoration:none; color:#0b57d0;}
 .toggles{margin-top:10px; display:flex; flex-direction:column; gap:8px;}
+.group{
+  margin-top:8px;
+  font-size:11px;
+  letter-spacing:0.04em;
+  text-transform:uppercase;
+  color:#666;
+}
 .row{display:flex; gap:8px; align-items:center; font-size:13px;}
 footer{margin-top:10px; color:#666;}

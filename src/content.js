@@ -1,22 +1,65 @@
-// YouTube Focus Mode - content script
+// YouTube Focus Mode - content script (MV3)
 
 const DEFAULTS = {
+  // Focus Mode
   enabled: true,
   hideShorts: true,
   hideHomeFeed: false,
   hideRelated: true,
   hideComments: true,
-  hideSidebar: false
+  hideSidebar: false,
+
+  // Extras
+  autoTheater: false,
+  rememberSpeedByChannel: true,
+  defaultSpeed: 1.25,
+  keyboardShortcuts: true,
+  notesOpen: false,
+  commentSearch: true
 };
 
 const STYLE_ID = "yt-focus-mode-style";
+const NOTES_STYLE_ID = "yt-focus-notes-style";
+const NOTES_PANEL_ID = "yt-focus-notes-panel";
+const COMMENT_STYLE_ID = "yt-focus-comment-search-style";
+const COMMENT_BAR_ID = "yt-focus-comment-search";
+
+let currentKeyHandler = null;
+let currentRateHandler = null;
+let currentUrl = location.href;
+let dragState = null;
+
+function isEditableTarget(target) {
+  if (!target) return false;
+  const tag = (target.tagName || "").toUpperCase();
+  return tag === "INPUT" || tag === "TEXTAREA" || target.isContentEditable;
+}
+
+function parseVideoId() {
+  try {
+    const url = new URL(location.href);
+    const v = url.searchParams.get("v");
+    if (v) return v;
+    const m = url.pathname.match(/^\/shorts\/([^/?#]+)/);
+    if (m) return m[1];
+  } catch {}
+  return null;
+}
+
+function formatTime(totalSeconds) {
+  const s = Math.max(0, Math.floor(totalSeconds || 0));
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const r = s % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+  return `${m}:${String(r).padStart(2, "0")}`;
+}
 
 function buildCss(settings) {
   if (!settings.enabled) return "";
 
   const rules = [];
 
-  // Shorts: shelves, tabs, carousels and Shorts pages
   if (settings.hideShorts) {
     rules.push(`
       ytd-reel-shelf-renderer,
@@ -32,7 +75,6 @@ function buildCss(settings) {
     `);
   }
 
-  // Home feed (subscriptions/home recommendations grid)
   if (settings.hideHomeFeed) {
     rules.push(`
       ytd-browse[page-subtype="home"] ytd-rich-grid-renderer,
@@ -43,7 +85,6 @@ function buildCss(settings) {
     `);
   }
 
-  // Related videos (watch page)
   if (settings.hideRelated) {
     rules.push(`
       #related,
@@ -53,7 +94,6 @@ function buildCss(settings) {
     `);
   }
 
-  // Comments (watch page)
   if (settings.hideComments) {
     rules.push(`
       #comments,
@@ -63,7 +103,6 @@ function buildCss(settings) {
     `);
   }
 
-  // Sidebar (left navigation)
   if (settings.hideSidebar) {
     rules.push(`
       ytd-guide-renderer,
@@ -78,11 +117,11 @@ function buildCss(settings) {
   return rules.join("\n");
 }
 
-function upsertStyle(cssText) {
-  let el = document.getElementById(STYLE_ID);
+function upsertStyle(id, cssText) {
+  let el = document.getElementById(id);
   if (!el) {
     el = document.createElement("style");
-    el.id = STYLE_ID;
+    el.id = id;
     document.documentElement.appendChild(el);
   }
   el.textContent = cssText;
@@ -93,25 +132,790 @@ async function getSettings() {
   return { ...DEFAULTS, ...stored };
 }
 
-async function apply() {
-  const settings = await getSettings();
-  upsertStyle(buildCss(settings));
+function getChannelKey() {
+  const a =
+    document.querySelector("ytd-watch-metadata ytd-channel-name a") ||
+    document.querySelector("#channel-name a") ||
+    document.querySelector("ytd-video-owner-renderer a.yt-simple-endpoint");
+
+  const href = a?.getAttribute?.("href") || "";
+  const text = (a?.textContent || "").trim();
+  if (href) return `href:${href}`;
+  if (text) return `name:${text}`;
+  return null;
 }
 
-// Re-apply on SPA navigation and storage changes
-apply();
+function getVideoEl() {
+  return document.querySelector("video");
+}
+
+function clamp(n, min, max) {
+  return Math.min(max, Math.max(min, n));
+}
+
+async function setSetting(key, value) {
+  await chrome.storage.sync.set({ [key]: value });
+}
+
+async function toggleSetting(key) {
+  const cur = await chrome.storage.sync.get({ [key]: DEFAULTS[key] });
+  await setSetting(key, !cur[key]);
+}
+
+async function waitFor(selector, timeoutMs = 6000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const el = document.querySelector(selector);
+    if (el) return el;
+    await new Promise(r => setTimeout(r, 200));
+  }
+  return null;
+}
+
+async function ensureTheater(settings) {
+  if (!settings.autoTheater) return;
+  if (!location.pathname.startsWith("/watch")) return;
+
+  const flexy = await waitFor("ytd-watch-flexy", 6000);
+  const sizeBtn = await waitFor(".ytp-size-button", 6000);
+  if (!flexy || !sizeBtn) return;
+
+  const isTheater = flexy.hasAttribute("theater") || flexy.getAttribute("theater") !== null;
+  if (!isTheater) sizeBtn.click();
+}
+
+function toggleTheaterNow() {
+  const btn = document.querySelector(".ytp-size-button");
+  if (btn) btn.click();
+}
+
+async function setupSpeedMemory(settings) {
+  const video = getVideoEl();
+  if (!video) return;
+
+  if (currentRateHandler) {
+    video.removeEventListener("ratechange", currentRateHandler);
+    currentRateHandler = null;
+  }
+
+  if (!settings.rememberSpeedByChannel) return;
+
+  const channelKey = getChannelKey();
+  const storageKey = channelKey ? `speedByChannel:${channelKey}` : null;
+
+  try {
+    if (storageKey) {
+      const data = await chrome.storage.sync.get({ [storageKey]: null });
+      if (typeof data[storageKey] === "number") {
+        video.playbackRate = clamp(data[storageKey], 0.25, 3);
+      } else if (typeof settings.defaultSpeed === "number" && settings.defaultSpeed > 0) {
+        video.playbackRate = clamp(settings.defaultSpeed, 0.25, 3);
+      }
+    } else if (typeof settings.defaultSpeed === "number" && settings.defaultSpeed > 0) {
+      video.playbackRate = clamp(settings.defaultSpeed, 0.25, 3);
+    }
+  } catch {}
+
+  currentRateHandler = async () => {
+    if (!storageKey) return;
+    try {
+      await chrome.storage.sync.set({ [storageKey]: video.playbackRate });
+    } catch {}
+  };
+
+  video.addEventListener("ratechange", currentRateHandler);
+}
+
+function removeNotesPanel() {
+  document.getElementById(NOTES_PANEL_ID)?.remove();
+  document.getElementById(NOTES_STYLE_ID)?.remove();
+}
+
+async function loadNotes(videoId) {
+  if (!videoId) return { text: "", items: [] };
+  const key = `notes:${videoId}`;
+  const data = await chrome.storage.sync.get({ [key]: { text: "", items: [] } });
+  return data[key] || { text: "", items: [] };
+}
+
+async function saveNotes(videoId, notes) {
+  if (!videoId) return;
+  const key = `notes:${videoId}`;
+  await chrome.storage.sync.set({ [key]: notes });
+}
+
+async function deleteNotes(videoId) {
+  if (!videoId) return;
+  const key = `notes:${videoId}`;
+  await chrome.storage.sync.remove([key]);
+}
+
+async function loadNotesPos() {
+  const data = await chrome.storage.sync.get({ notesPanelPos: null });
+  return data.notesPanelPos;
+}
+
+async function saveNotesPos(pos) {
+  await chrome.storage.sync.set({ notesPanelPos: pos });
+}
+
+function ensureNotesStyle() {
+  const css = `
+    #${NOTES_PANEL_ID} {
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      width: 360px;
+      max-width: calc(100vw - 32px);
+      max-height: 60vh;
+      background: rgba(20,20,20,0.92);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      z-index: 2147483647;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+    }
+    #${NOTES_PANEL_ID} header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.12);
+      font: 600 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      cursor: grab;
+      user-select: none;
+    }
+    #${NOTES_PANEL_ID}.dragging header { cursor: grabbing; }
+    #${NOTES_PANEL_ID} header .title {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      min-width: 0;
+    }
+    #${NOTES_PANEL_ID} header .title span {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 190px;
+      opacity: 0.95;
+    }
+    #${NOTES_PANEL_ID} header .actions {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      flex: 0 0 auto;
+    }
+    #${NOTES_PANEL_ID} header button {
+      border: 0;
+      background: rgba(255,255,255,0.12);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 10px;
+      cursor: pointer;
+      font: 700 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+    #${NOTES_PANEL_ID} header button:hover { filter: brightness(1.06); }
+    #${NOTES_PANEL_ID} .body {
+      padding: 10px 12px;
+      display: grid;
+      gap: 10px;
+      overflow: auto;
+    }
+    #${NOTES_PANEL_ID} textarea {
+      width: 100%;
+      min-height: 110px;
+      resize: vertical;
+      border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.16);
+      padding: 10px;
+      background: rgba(0,0,0,0.25);
+      color: #fff;
+      outline: none;
+      font: 13px/1.35 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+    #${NOTES_PANEL_ID} .row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    #${NOTES_PANEL_ID} .row .hint {
+      opacity: 0.75;
+      font: 12px/1.2 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+    #${NOTES_PANEL_ID} .items {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+    #${NOTES_PANEL_ID} .chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.08);
+      color: #fff;
+      padding: 6px 8px;
+      border-radius: 999px;
+      font: 700 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+    #${NOTES_PANEL_ID} .chip button {
+      border: 0;
+      background: transparent;
+      color: inherit;
+      cursor: pointer;
+      padding: 0 4px;
+      font: inherit;
+      opacity: 0.95;
+    }
+    #${NOTES_PANEL_ID} .chip button:hover { opacity: 1; }
+    #${NOTES_PANEL_ID} .chip .del { opacity: 0.75; }
+  `;
+  upsertStyle(NOTES_STYLE_ID, css);
+}
+
+function startDrag(panel, e) {
+  if (!panel) return;
+  const header = panel.querySelector("header");
+  if (!header) return;
+
+  // do not start drag when clicking buttons
+  if (e.target && (e.target.tagName || "").toUpperCase() === "BUTTON") return;
+
+  const rect = panel.getBoundingClientRect();
+  dragState = {
+    startX: e.clientX,
+    startY: e.clientY,
+    startLeft: rect.left,
+    startTop: rect.top
+  };
+
+  panel.classList.add("dragging");
+
+  const onMove = (ev) => {
+    if (!dragState) return;
+    const dx = ev.clientX - dragState.startX;
+    const dy = ev.clientY - dragState.startY;
+
+    const newLeft = clamp(dragState.startLeft + dx, 8, window.innerWidth - rect.width - 8);
+    const newTop = clamp(dragState.startTop + dy, 8, window.innerHeight - rect.height - 8);
+
+    panel.style.left = `${newLeft}px`;
+    panel.style.top = `${newTop}px`;
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+  };
+
+  const onUp = async () => {
+    panel.classList.remove("dragging");
+    document.removeEventListener("mousemove", onMove, true);
+    document.removeEventListener("mouseup", onUp, true);
+
+    const r = panel.getBoundingClientRect();
+    dragState = null;
+    await saveNotesPos({ left: Math.round(r.left), top: Math.round(r.top) });
+  };
+
+  document.addEventListener("mousemove", onMove, true);
+  document.addEventListener("mouseup", onUp, true);
+}
+
+async function ensureNotesPanel(settings) {
+  if (!settings.notesOpen) {
+    removeNotesPanel();
+    return;
+  }
+
+  ensureNotesStyle();
+
+  let panel = document.getElementById(NOTES_PANEL_ID);
+  if (!panel) {
+    panel = document.createElement("div");
+    panel.id = NOTES_PANEL_ID;
+    panel.innerHTML = `
+      <header>
+        <div class="title">
+          <span>notas do video</span>
+        </div>
+        <div class="actions">
+          <button id="ytfn-save" title="Salvar">salvar</button>
+          <button id="ytfn-clear" title="Excluir">excluir</button>
+          <button id="ytfn-close" title="Fechar">fechar</button>
+        </div>
+      </header>
+      <div class="body">
+        <div class="row">
+          <button id="ytfn-add">+ timestamp</button>
+          <div class="hint">arraste pelo topo</div>
+        </div>
+        <div class="items" id="ytfn-items"></div>
+        <textarea id="ytfn-text" placeholder="anote aqui" spellcheck="true"></textarea>
+      </div>
+    `;
+
+    document.documentElement.appendChild(panel);
+
+    // drag
+    panel.querySelector("header")?.addEventListener("mousedown", (e) => startDrag(panel, e));
+
+    panel.querySelector("#ytfn-close")?.addEventListener("click", () => setSetting("notesOpen", false));
+  }
+
+  // apply saved position once per open
+  const pos = await loadNotesPos();
+  if (pos && typeof pos.left === "number" && typeof pos.top === "number") {
+    panel.style.left = `${pos.left}px`;
+    panel.style.top = `${pos.top}px`;
+    panel.style.right = "auto";
+    panel.style.bottom = "auto";
+  }
+
+  const videoId = parseVideoId();
+  const title = (document.querySelector("h1 yt-formatted-string")?.textContent || "notas do video").trim();
+  panel.querySelector("header .title span").textContent = title || "notas do video";
+
+  const textEl = panel.querySelector("#ytfn-text");
+  const itemsEl = panel.querySelector("#ytfn-items");
+  const addBtn = panel.querySelector("#ytfn-add");
+  const saveBtn = panel.querySelector("#ytfn-save");
+  const clearBtn = panel.querySelector("#ytfn-clear");
+
+  let notes = await loadNotes(videoId);
+  if (!notes || typeof notes !== "object") notes = { text: "", items: [] };
+  if (!Array.isArray(notes.items)) notes.items = [];
+
+  const renderItems = () => {
+    itemsEl.innerHTML = "";
+
+    notes.items.forEach((it, idx) => {
+      const chip = document.createElement("span");
+      chip.className = "chip";
+
+      const jump = document.createElement("button");
+      jump.textContent = it.label;
+      jump.title = "ir para este tempo";
+      jump.addEventListener("click", () => {
+        const v = getVideoEl();
+        if (v) v.currentTime = it.t;
+      });
+
+      const del = document.createElement("button");
+      del.textContent = "×";
+      del.className = "del";
+      del.title = "excluir timestamp";
+      del.addEventListener("click", async () => {
+        notes.items.splice(idx, 1);
+        renderItems();
+        await saveNotes(videoId, notes);
+      });
+
+      chip.appendChild(jump);
+      chip.appendChild(del);
+      itemsEl.appendChild(chip);
+    });
+  };
+
+  renderItems();
+  textEl.value = notes.text || "";
+
+  // autosave with debounce
+  let saveTimer = null;
+  const scheduleAutoSave = () => {
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      notes.text = textEl.value;
+      saveNotes(videoId, notes);
+    }, 500);
+  };
+
+  textEl.oninput = scheduleAutoSave;
+
+  addBtn.onclick = async () => {
+    const v = getVideoEl();
+    if (!v) return;
+    const t = Math.floor(v.currentTime || 0);
+    const entry = { t, label: formatTime(t) };
+    notes.items = [entry, ...notes.items].slice(0, 30);
+    renderItems();
+    await saveNotes(videoId, notes);
+  };
+
+  saveBtn.onclick = async () => {
+    notes.text = textEl.value;
+    await saveNotes(videoId, notes);
+  };
+
+  clearBtn.onclick = async () => {
+    if (!videoId) return;
+    notes = { text: "", items: [] };
+    textEl.value = "";
+    renderItems();
+    await deleteNotes(videoId);
+  };
+}
+
+function normalizeText(s, { ignoreCase = true, ignoreAccents = true } = {}) {
+  let t = String(s ?? "");
+  if (ignoreCase) t = t.toLowerCase();
+  if (ignoreAccents) t = t.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return t;
+}
+
+function getLoadedCommentThreads() {
+  return Array.from(document.querySelectorAll("ytd-comment-thread-renderer"));
+}
+
+function getThreadCombinedText(thread) {
+  const nodes = thread.querySelectorAll("#content-text");
+  return Array.from(nodes).map(n => (n.textContent || "").trim()).join("\n");
+}
+
+function ensureCommentSearchStyle() {
+  const css = `
+    #${COMMENT_BAR_ID} {
+      margin: 12px 0 14px 0;
+      padding: 12px;
+      border-radius: 14px;
+      background: var(--yt-spec-raised-background, rgba(255,255,255,0.92));
+      color: var(--yt-spec-text-primary, #0f0f0f);
+      border: 1px solid var(--yt-spec-10-percent-layer, rgba(0,0,0,0.10));
+      box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+    }
+    html[dark] #${COMMENT_BAR_ID} {
+      border-color: var(--yt-spec-10-percent-layer, rgba(255,255,255,0.14));
+      box-shadow: 0 2px 12px rgba(0,0,0,0.22);
+    }
+
+    #${COMMENT_BAR_ID} .ytfm-top {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+    }
+
+    #${COMMENT_BAR_ID} .ytfm-input {
+      flex: 1 1 320px;
+      min-width: 220px;
+      height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--yt-spec-10-percent-layer, rgba(0,0,0,0.14));
+      background: var(--yt-spec-base-background, rgba(255,255,255,0.7));
+      color: var(--yt-spec-text-primary, #0f0f0f);
+      outline: none;
+      font: 13px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+    html[dark] #${COMMENT_BAR_ID} .ytfm-input {
+      background: rgba(0,0,0,0.18);
+      border-color: rgba(255,255,255,0.18);
+      color: #fff;
+    }
+    #${COMMENT_BAR_ID} .ytfm-input:focus {
+      border-color: var(--yt-spec-call-to-action, #065fd4);
+      box-shadow: 0 0 0 3px rgba(6,95,212,0.18);
+    }
+
+    #${COMMENT_BAR_ID} .ytfm-btn {
+      height: 34px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--yt-spec-10-percent-layer, rgba(0,0,0,0.12));
+      cursor: pointer;
+      background: var(--yt-spec-badge-chip-background, rgba(0,0,0,0.06));
+      color: var(--yt-spec-text-primary, #0f0f0f);
+      font: 600 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+    }
+    html[dark] #${COMMENT_BAR_ID} .ytfm-btn {
+      background: rgba(255,255,255,0.10);
+      border-color: rgba(255,255,255,0.14);
+      color: #fff;
+    }
+    #${COMMENT_BAR_ID} .ytfm-btn-primary {
+      background: var(--yt-spec-call-to-action, #065fd4);
+      border-color: transparent;
+      color: #fff;
+    }
+
+    #${COMMENT_BAR_ID} .ytfm-options {
+      margin-top: 10px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      align-items: center;
+    }
+
+    #${COMMENT_BAR_ID} .ytfm-opt {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      user-select: none;
+      font: 600 12px/1 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      opacity: 0.9;
+    }
+
+    #${COMMENT_BAR_ID} input[type="checkbox"] {
+      width: 14px;
+      height: 14px;
+      accent-color: var(--yt-spec-call-to-action, #065fd4);
+      transform: translateY(1px);
+    }
+
+    #${COMMENT_BAR_ID} .ytfm-meta {
+      margin-top: 8px;
+      font: 12px/1.25 system-ui, -apple-system, Segoe UI, Roboto, Arial;
+      opacity: 0.72;
+    }
+
+    ytd-comment-thread-renderer.ytfm-comment-match {
+      scroll-margin-top: 96px;
+      border-radius: 12px;
+      background: rgba(34, 197, 94, 0.06);
+      box-shadow: inset 4px 0 0 rgba(34, 197, 94, 0.95);
+    }
+    html[dark] ytd-comment-thread-renderer.ytfm-comment-match {
+      background: rgba(34, 197, 94, 0.12);
+    }
+  `;
+
+  upsertStyle(COMMENT_STYLE_ID, css);
+}
+
+async function loadMoreCommentsOnce() {
+  const comments = document.querySelector("#comments");
+  if (comments) comments.scrollIntoView({ behavior: "smooth", block: "start" });
+  await new Promise(r => setTimeout(r, 500));
+  window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+  await new Promise(r => setTimeout(r, 900));
+}
+
+function clearCommentMatches() {
+  for (const thread of getLoadedCommentThreads()) {
+    thread.classList.remove("ytfm-comment-match");
+    thread.style.display = "";
+  }
+}
+
+function runCommentSearch({ query, filterMode, matchAllWords, ignoreAccents }) {
+  const q = normalizeText(query, { ignoreCase: true, ignoreAccents });
+  const words = q.split(/\s+/).map(s => s.trim()).filter(Boolean);
+
+  const threads = getLoadedCommentThreads();
+  let matches = 0;
+
+  for (const thread of threads) {
+    const text = normalizeText(getThreadCombinedText(thread), { ignoreCase: true, ignoreAccents });
+    const ok = words.length === 0
+      ? false
+      : (matchAllWords ? words.every(w => text.includes(w)) : words.some(w => text.includes(w)));
+
+    if (ok) {
+      matches++;
+      thread.classList.add("ytfm-comment-match");
+      thread.style.display = "";
+    } else {
+      thread.classList.remove("ytfm-comment-match");
+      thread.style.display = filterMode ? "none" : "";
+    }
+  }
+
+  return { matches, total: threads.length };
+}
+
+function removeCommentSearchBar() {
+  document.getElementById(COMMENT_BAR_ID)?.remove();
+  document.getElementById(COMMENT_STYLE_ID)?.remove();
+  clearCommentMatches();
+}
+
+async function ensureCommentSearchBar(settings) {
+  if (!location.pathname.startsWith("/watch")) {
+    removeCommentSearchBar();
+    return;
+  }
+
+  if (settings.hideComments || !settings.commentSearch) {
+    removeCommentSearchBar();
+    return;
+  }
+
+  const commentsRoot = await waitFor("#comments", 6000);
+  if (!commentsRoot) return;
+
+  ensureCommentSearchStyle();
+
+  let bar = document.getElementById(COMMENT_BAR_ID);
+  if (!bar) {
+    bar = document.createElement("div");
+    bar.id = COMMENT_BAR_ID;
+    bar.innerHTML = `
+      <div class="ytfm-top">
+        <input class="ytfm-input" id="ytfm-cq" type="text" placeholder="Pesquisar comentários… (ex: manda salve)" />
+        <button class="ytfm-btn ytfm-btn-primary" id="ytfm-csearch" title="Pesquisar">Pesquisar</button>
+        <button class="ytfm-btn" id="ytfm-cclear" title="Limpar">Limpar</button>
+        <button class="ytfm-btn" id="ytfm-cload" title="Carregar mais comentários">Carregar mais</button>
+      </div>
+      <div class="ytfm-options">
+        <label class="ytfm-opt"><input id="ytfm-cfilter" type="checkbox" /> Filtrar</label>
+        <label class="ytfm-opt"><input id="ytfm-call" type="checkbox" /> Todas as palavras</label>
+        <label class="ytfm-opt"><input id="ytfm-cacc" type="checkbox" checked /> Ignorar acentos</label>
+      </div>
+      <div class="ytfm-meta" id="ytfm-cmeta">Dica: role a página ou use “Carregar mais” para buscar em mais comentários carregados.</div>
+    `;
+
+    const header = document.querySelector("ytd-comments-header-renderer");
+    if (header?.parentElement) {
+      header.parentElement.insertBefore(bar, header.nextSibling);
+    } else {
+      commentsRoot.prepend(bar);
+    }
+
+    const q = bar.querySelector("#ytfm-cq");
+    const btnSearch = bar.querySelector("#ytfm-csearch");
+    const btnClear = bar.querySelector("#ytfm-cclear");
+    const btnLoad = bar.querySelector("#ytfm-cload");
+    const chkFilter = bar.querySelector("#ytfm-cfilter");
+    const chkAll = bar.querySelector("#ytfm-call");
+    const chkAcc = bar.querySelector("#ytfm-cacc");
+    const meta = bar.querySelector("#ytfm-cmeta");
+
+    const update = () => {
+      const query = q.value;
+      clearCommentMatches();
+      if (!query.trim()) {
+        meta.textContent = "Digite uma palavra/frase e clique em Pesquisar.";
+        return;
+      }
+      const res = runCommentSearch({
+        query,
+        filterMode: chkFilter.checked,
+        matchAllWords: chkAll.checked,
+        ignoreAccents: chkAcc.checked
+      });
+      meta.textContent = `${res.matches} encontrado(s) • ${res.total} comentários carregados`;
+
+      if (res.matches > 0) {
+        const first = document.querySelector("ytd-comment-thread-renderer.ytfm-comment-match");
+        first?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+      }
+    };
+
+    btnSearch.addEventListener("click", update);
+    q.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") update();
+    });
+
+    btnClear.addEventListener("click", () => {
+      q.value = "";
+      chkFilter.checked = false;
+      chkAll.checked = false;
+      clearCommentMatches();
+      meta.textContent = "Digite uma palavra/frase e clique em Pesquisar.";
+      q.focus();
+    });
+
+    btnLoad.addEventListener("click", async () => {
+      meta.textContent = "Carregando mais comentários…";
+      await loadMoreCommentsOnce();
+      if (q.value.trim()) update();
+      else meta.textContent = "Mais comentários carregados. Agora pesquise.";
+    });
+
+    chkFilter.addEventListener("change", () => q.value.trim() && update());
+    chkAll.addEventListener("change", () => q.value.trim() && update());
+    chkAcc.addEventListener("change", () => q.value.trim() && update());
+
+    meta.textContent = "Digite uma palavra/frase e clique em Pesquisar.";
+  }
+}
+
+function focusCommentSearch() {
+  const q = document.querySelector(`#${COMMENT_BAR_ID} #ytfm-cq`);
+  if (q) {
+    q.focus();
+    q.select?.();
+    return true;
+  }
+  return false;
+}
+
+function setupKeyboard(settings) {
+  if (currentKeyHandler) {
+    document.removeEventListener("keydown", currentKeyHandler, true);
+    currentKeyHandler = null;
+  }
+
+  if (!settings.keyboardShortcuts) return;
+
+  currentKeyHandler = (e) => {
+    if (!e.shiftKey) return;
+    if (isEditableTarget(e.target)) return;
+
+    const video = getVideoEl();
+
+    switch (e.code) {
+      case "KeyF":
+        e.preventDefault();
+        toggleSetting("enabled");
+        break;
+      case "KeyN":
+        e.preventDefault();
+        toggleSetting("notesOpen");
+        break;
+      case "KeyT":
+        e.preventDefault();
+        toggleTheaterNow();
+        break;
+      case "KeyC":
+        if (settings.commentSearch) {
+          const ok = focusCommentSearch();
+          if (ok) e.preventDefault();
+        }
+        break;
+      case "ArrowUp":
+        if (!video) return;
+        e.preventDefault();
+        video.playbackRate = clamp((video.playbackRate || 1) + 0.25, 0.25, 3);
+        break;
+      case "ArrowDown":
+        if (!video) return;
+        e.preventDefault();
+        video.playbackRate = clamp((video.playbackRate || 1) - 0.25, 0.25, 3);
+        break;
+      default:
+        break;
+    }
+  };
+
+  document.addEventListener("keydown", currentKeyHandler, true);
+}
+
+async function applyAll() {
+  const settings = await getSettings();
+  upsertStyle(STYLE_ID, buildCss(settings));
+
+  setupKeyboard(settings);
+  ensureNotesPanel(settings);
+  ensureCommentSearchBar(settings);
+
+  ensureTheater(settings);
+  setupSpeedMemory(settings);
+}
+
+applyAll();
 
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "sync") return;
-  const keys = Object.keys(changes);
-  if (keys.some(k => k in DEFAULTS)) apply();
+  applyAll();
 });
 
-// YouTube uses SPA navigation; watch for URL changes
-let lastUrl = location.href;
 new MutationObserver(() => {
-  if (location.href !== lastUrl) {
-    lastUrl = location.href;
-    apply();
+  if (location.href !== currentUrl) {
+    currentUrl = location.href;
+    applyAll();
   }
 }).observe(document, { subtree: true, childList: true });
