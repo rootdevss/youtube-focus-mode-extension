@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YouTube Focus Mode • Configurações</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <main>
+      <h1>Configurações</h1>
+      <p>Escolha o que esconder no YouTube. As mudanças são aplicadas automaticamente.</p>
+
+      <section class="card">
+        <label><input id="enabled" type="checkbox" /> Ativado</label>
+        <label><input id="hideShorts" type="checkbox" /> Esconder Shorts</label>
+        <label><input id="hideRelated" type="checkbox" /> Esconder relacionados</label>
+        <label><input id="hideComments" type="checkbox" /> Esconder comentários</label>
+        <label><input id="hideSidebar" type="checkbox" /> Esconder menu lateral</label>
+        <label><input id="hideHomeFeed" type="checkbox" /> Esconder feed da Home</label>
+      </section>
+
+      <p class="hint">Dica: se algum elemento do YouTube mudar, talvez seja preciso ajustar seletores CSS em <code>src/content.js</code>.</p>
+    </main>
+
+    <script src="options.js"></script>
+  </body>
+</html>

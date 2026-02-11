@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "YouTube Focus Mode",
+  "version": "0.1.0",
+  "description": "Reduz distrações no YouTube (Shorts, recomendações, comentários) com toggles simples.",
+  "permissions": ["storage"],
+  "host_permissions": ["*://*.youtube.com/*"],
+  "action": {
+    "default_title": "YouTube Focus Mode",
+    "default_popup": "src/popup.html"
+  },
+  "options_page": "src/options.html",
+  "content_scripts": [
+    {
+      "matches": ["*://*.youtube.com/*"],
+      "js": ["src/content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

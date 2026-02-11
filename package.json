@@ -1,0 +1,9 @@
+{
+  "name": "youtube-focus-mode-extension",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Extensão MV3 para reduzir distrações no YouTube.",
+  "scripts": {
+    "lint": "echo \"(opcional) adicione eslint/prettier se quiser\""
+  }
+}
