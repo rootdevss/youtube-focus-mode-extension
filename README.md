@@ -1,37 +1,34 @@
 # youtube focus mode
 
-extensao mv3 para deixar o youtube mais limpo e mais produtivo
+extensao pra limpar o youtube e focar mais
 
-## o que tem
-- focus mode para esconder shorts relacionados comentarios menu lateral e feed da home
-- auto theater opcional em videos
-- velocidade por canal opcional e velocidade padrao
-- atalhos de teclado opcionais shift f n t e shift seta pra cima ou baixo
-- notas por video com timestamps
-- buscar comentarios por palavra ou frase direto na area de comentarios
+## tem isso aqui
+- esconde shorts videos relacionados comentarios etc
+- modo theater automatico se quiser
+- velocidade por canal (salva a velocidade de cada canal)
+- atalhos de teclado
+- bloco de notas por video com timestamps
+- buscar nos comentarios
 
-## instalar no chrome ou edge
-- abra chrome://extensions ou edge://extensions
-- ative developer mode
-- clique em load unpacked e selecione a pasta do projeto onde esta o manifest json
+## como instalar
+abra chrome://extensions ou edge://extensions
+ativa o developer mode
+clica em load unpacked e seleciona a pasta
 
 ## usar
-- abra um video e use o popup da extensao para ligar e desligar funcoes
-- notas podem ser arrastadas pela barra do topo e a posicao fica salva
-- a busca de comentarios aparece acima dos comentarios quando esconder comentarios estiver desligado
+abre qualquer video e usa o popup da extensao pra ligar as coisas
+as notas podem arrastar e a posicao fica salva
 
 ## atalhos
-- shift f alterna focus mode
-- shift n abre ou fecha notas
-- shift t alterna theater
-- shift c foca a busca de comentarios
-- shift seta para cima ou baixo ajusta a velocidade
+shift+f - liga/desliga focus mode
+shift+n - abre notas
+shift+t - theater mode
+shift+c - buscar comentarios
+shift+setas - velocidade
 
 ## privacidade
-- nao usa servidor
-- salva configuracoes e notas no chrome storage sync
+nao usa nenhum servidor externo
+salva tudo local no chrome.storage.sync
 
-## publicar depois
-- ja tem licenca mit
-- tem privacy e security docs
-- quando quiser basta deixar o repo publico e opcionalmente publicar na chrome web store
+## licenca
+mit
